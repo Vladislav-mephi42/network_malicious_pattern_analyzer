@@ -21,7 +21,9 @@
 
 using json = nlohmann::json;
 
-bool fifo_exists(const std::string &path) {
+constexpr uint32_t max_buf = 1000000000;
+
+inline bool fifo_exists(const std::string &path) {
   struct stat buffer;
   return (stat(path.c_str(), &buffer) == 0 && S_ISFIFO(buffer.st_mode));
 }
@@ -30,190 +32,169 @@ class FIFOWriter {
 private:
   int fd = -1;
   std::string fifo_name;
-  static std::mutex global_mutex;
-  static std::mutex fifo_creation_mutex;
+  bool delete_flag = true;
+  FIFOWriter() {}
 
 public:
-  FIFOWriter(const std::string &fifo_name, bool creation_flag = true)
-      : fifo_name(fifo_name) {
-    std::lock_guard<std::mutex> lock(fifo_creation_mutex);
-    if (creation_flag && !fifo_exists(fifo_name)) {
-      if (mkfifo(fifo_name.c_str(), 0666) != 0) {
+  void swap(FIFOWriter &other) noexcept {
+    std::swap(fd, other.fd);
+    std::swap(fifo_name, other.fifo_name);
+    std::swap(delete_flag, other.delete_flag);
+  }
+  FIFOWriter(const std::string &fifo_name, bool create_flag = true)
+      : fifo_name(fifo_name), delete_flag(create_flag) {
+    if (create_flag) {
+      if (mkfifo(fifo_name.c_str(), 0644) < 0) {
+        if (errno == EEXIST) {
+          throw std::runtime_error("FIFO already exists: " + fifo_name);
+        }
         throw std::system_error(errno, std::generic_category(),
-                                "Failed to create FIFO");
+                                "mkfifo failed");
+      }
+      if ((fd = open(fifo_name.c_str(), O_WRONLY)) < 0) {
+        unlink(fifo_name.c_str());
+        throw std::system_error(errno, std::generic_category(), "bad open");
+      }
+    } else {
+      if (!fifo_exists(fifo_name)) {
+        throw std::runtime_error("fifo didn`t exist");
+      }
+      if ((fd = open(fifo_name.c_str(), O_WRONLY)) < 0) {
+        throw std::system_error(errno, std::generic_category(), "bad open");
       }
     }
-    fd = open(fifo_name.c_str(), O_WRONLY);
-    if (fd < 0) {
-      throw std::system_error(errno, std::generic_category(),
-                              "Failed to open FIFO for writing");
-    }
   }
-
   ~FIFOWriter() {
     if (fd != -1) {
-      close(fd);
-      fd = -1;
-    }
-
-    std::lock_guard<std::mutex> lock(fifo_creation_mutex);
-    if (!fifo_name.empty() && fifo_exists(fifo_name)) {
-      unlink(fifo_name.c_str());
-    }
-  }
-
-  FIFOWriter(const FIFOWriter &other) = delete;
-  FIFOWriter &operator=(const FIFOWriter &other) = delete;
-
-  FIFOWriter(FIFOWriter &&other) noexcept {
-    std::lock_guard<std::mutex> lock(fifo_creation_mutex);
-    fd = other.fd;
-    fifo_name = std::move(other.fifo_name);
-    other.fd = -1;
-    other.fifo_name.clear();
-  }
-
-  FIFOWriter &operator=(FIFOWriter &&other) noexcept {
-    if (this != &other) {
-
-      if (fd != -1) {
-        close(fd);
+      if (delete_flag) {
         unlink(fifo_name.c_str());
       }
+      close(fd);
+    }
+  }
 
-      std::lock_guard<std::mutex> lock(fifo_creation_mutex);
-      fd = other.fd;
-      fifo_name = std::move(other.fifo_name);
-      other.fd = -1;
-      other.fifo_name.clear();
+  FIFOWriter(FIFOWriter &) = delete;
+  FIFOWriter &operator=(FIFOWriter &) = delete;
+  FIFOWriter(FIFOWriter &&other) noexcept { swap(other); }
+  FIFOWriter &operator=(FIFOWriter &&other) noexcept {
+    if (this != &other) {
+      swap(other);
     }
     return *this;
   }
 
-  void write_all(const char *buf, size_t len) {
-    size_t total_written = 0;
-    while (total_written < len) {
-      ssize_t written = write(fd, buf + total_written, len - total_written);
-      if (written < 0) {
-        if (errno == EINTR)
-          continue;
+  void write_n(const void *data, size_t n) {
+
+    int total = 0;
+    int current = 0;
+    while (current < n) {
+      total = write(fd, static_cast<const char *>(data) + current, n - current);
+      if (total < 0) {
         throw std::system_error(errno, std::generic_category(),
-                                "Failed to write to FIFO");
+                                "write call failed");
       }
-      if (written == 0) {
-        throw std::runtime_error("Write returned 0 bytes");
-      }
-      total_written += written;
+      current += total;
     }
   }
-
-  void write_json(const json &data) {
-    std::lock_guard<std::mutex> lock(global_mutex);
-
-    std::string str = data.dump();
-    uint64_t len = str.size();
-
-    write_all(reinterpret_cast<const char *>(&len), sizeof(len));
-
-    write_all(str.data(), str.size());
+  void write_all(const char *data, size_t n) {
+    uint32_t len = static_cast<uint32_t>(n);
+    write_n(&len, sizeof(uint32_t));
+    write_n(data, n);
   }
+  void write_json(const json &data) {
+    auto str = data.dump();
 
-  const std::string &get_name() const { return fifo_name; }
+    write_all(str.c_str(), str.size());
+  }
 };
 
 class FIFOReader {
 private:
   int fd = -1;
   std::string fifo_name;
-  static std::mutex fifo_creation_mutex;
+  bool delete_flag = false;
+  FIFOReader() {}
 
 public:
-  FIFOReader(const std::string &fifo_name, bool creation_flag = false)
-      : fifo_name(fifo_name) {
-    if (creation_flag && !fifo_exists(fifo_name)) {
-      if (mkfifo(fifo_name.c_str(), 0666) != 0) {
-        throw std::system_error(errno, std::generic_category(),
-                                "Failed to create FIFO");
-      }
-    }
-    fd = open(fifo_name.c_str(), O_RDONLY);
-    if (fd < 0) {
-      throw std::system_error(errno, std::generic_category(),
-                              "Failed to open FIFO for reading");
-    }
+  void swap(FIFOReader &other) noexcept {
+    std::swap(fd, other.fd);
+    std::swap(fifo_name, other.fifo_name);
+    std::swap(delete_flag, other.delete_flag);
   }
 
+  FIFOReader(const std::string &fifo_name, bool create_flag = false)
+      : fifo_name(fifo_name), delete_flag(create_flag) {
+    if (create_flag) {
+      if (fifo_exists(fifo_name)) {
+        throw std::runtime_error("fifo exist");
+      }
+      if (mkfifo(fifo_name.c_str(), 0644) < 0) {
+        throw std::system_error(errno, std::generic_category(),
+                                "mkfifo failed");
+      }
+      if ((fd = open(fifo_name.c_str(), O_RDONLY)) < 0) {
+        throw std::system_error(errno, std::generic_category(), "bad open");
+      }
+    } else {
+      if (!fifo_exists(fifo_name)) {
+        throw std::runtime_error("fifo didn`t exist");
+      }
+      if ((fd = open(fifo_name.c_str(), O_RDONLY)) < 0) {
+        throw std::system_error(errno, std::generic_category(), "bad open");
+      }
+    }
+  }
   ~FIFOReader() {
     if (fd != -1) {
+      if (delete_flag) {
+        unlink(fifo_name.c_str());
+      }
       close(fd);
     }
-    std::lock_guard<std::mutex> lock(fifo_creation_mutex);
-    if (!fifo_name.empty() && fifo_exists(fifo_name)) {
-      unlink(fifo_name.c_str());
-    }
   }
 
-  FIFOReader(const FIFOReader &other) = delete;
-  FIFOReader &operator=(const FIFOReader &other) = delete;
-
-  FIFOReader(FIFOReader &&other) noexcept {
-    fd = other.fd;
-    fifo_name = std::move(other.fifo_name);
-    other.fd = -1;
-  }
-
+  FIFOReader(FIFOReader &) = delete;
+  FIFOReader &operator=(FIFOReader &) = delete;
+  FIFOReader(FIFOReader &&other) noexcept { swap(other); }
   FIFOReader &operator=(FIFOReader &&other) noexcept {
-    if (this != &other) {
-      if (fd != -1) {
-        close(fd);
-      }
-      fd = other.fd;
-      fifo_name = std::move(other.fifo_name);
-      other.fd = -1;
-    }
+    FIFOReader tmp(std::move(other));
+    swap(tmp);
     return *this;
   }
 
-  void read_all(char *buf, size_t len) {
-    size_t total_read = 0;
-    while (total_read < len) {
-      ssize_t read_bytes = read(fd, buf + total_read, len - total_read);
-      if (read_bytes < 0) {
-        if (errno == EINTR)
-          continue;
+  void read_n(void *data, size_t n) {
+    size_t total = 0;
+    size_t current = 0;
+    while (current < n) {
+
+      total = read(fd, static_cast<char *>(data) + current, n - current);
+      if (total < 0) {
         throw std::system_error(errno, std::generic_category(),
-                                "Failed to read from FIFO");
+                                "write call failed");
       }
-      if (read_bytes == 0) {
-        throw std::runtime_error("EOF reached");
+      if (total == 0) {
+        throw std::runtime_error("EOF");
       }
-      total_read += read_bytes;
+      current += total;
     }
   }
 
   json read_json() {
-    uint64_t len = 0;
 
-    read_all(reinterpret_cast<char *>(&len), sizeof(len));
-
-    if (len > 100 * 1024 * 1024) {
-      throw std::runtime_error("Message too large: " + std::to_string(len) +
-                               " bytes");
+    uint32_t len = 0;
+    read_n(&len, sizeof(uint32_t));
+    if (len > max_buf) {
+      throw std::runtime_error("message len must be less ");
     }
+    if (len == 0) {
+      throw std::runtime_error("zero len messages are not available");
+    }
+    std::string payload;
+    payload.resize(len);
+    read_n(payload.data(), len);
 
-    std::string buf;
-    buf.resize(len);
-    read_all(buf.data(), len);
-
-    return json::parse(buf);
+    return json::parse(payload);
   }
-
-  int get_fd() const { return fd; }
-  const std::string &get_name() const { return fifo_name; }
 };
-
-std::mutex FIFOWriter::global_mutex;
-std::mutex FIFOWriter::fifo_creation_mutex;
-std::mutex FIFOReader::fifo_creation_mutex;
 
 #endif
