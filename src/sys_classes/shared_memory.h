@@ -1,322 +1,215 @@
 #ifndef SHARED_H
 #define SHARED_H
-#include <string>
 
+#include <cerrno>
 #include <fcntl.h>
-#include <filesystem>
 #include <iostream>
-#include <netinet/in.h>
 #include <nlohmann/json.hpp>
 #include <semaphore.h>
 #include <stdexcept>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string>
 #include <sys/mman.h>
 #include <sys/shm.h>
-#include <sys/socket.h>
 #include <sys/stat.h>
-#include <sys/types.h>
-#include <time.h>
+#include <system_error>
 #include <unistd.h>
 #include <utility>
+
 using json = nlohmann::json;
 
-void write_n_to_memory(caddr_t memptr, off_t byte_size, off_t offset,
-                       const void *buf, size_t n) {
-
-  if (offset + n > static_cast<size_t>(byte_size)) {
-    throw std::runtime_error("Data too large for shared memory");
-  }
-
-  memcpy(memptr + offset, buf, n);
-}
-
-void write_json(caddr_t memptr, off_t byte_size, const json &data) {
-  auto str = data.dump();
-  uint32_t n = str.size();
-
-  if (sizeof(uint32_t) + n > static_cast<size_t>(byte_size)) {
-    throw std::runtime_error("JSON data too large for shared memory");
-  }
-
-  memcpy(memptr, &n, sizeof(uint32_t));
-
-  memcpy(memptr + sizeof(uint32_t), str.c_str(), n);
-}
-
-void read_n_from_memory(caddr_t memptr, off_t byte_size, off_t offset,
-                        void *buf, size_t n) {
-
-  if (offset + n > static_cast<size_t>(byte_size)) {
-    throw std::runtime_error("Read beyond shared memory bounds");
-  }
-
-  memcpy(buf, memptr + offset, n);
-}
-
-json read_json(caddr_t memptr, off_t byte_size) {
-  uint32_t n = 0;
-
-  memcpy(&n, memptr, sizeof(uint32_t));
-
-  if (sizeof(uint32_t) + n > static_cast<size_t>(byte_size)) {
-    throw std::runtime_error("Invalid data size in shared memory");
-  }
-
-  std::string str;
-  str.resize(n);
-  memcpy(str.data(), memptr + sizeof(uint32_t), n);
-
-  return json::parse(str);
-}
-
-class MemoryParent {
+class SharedMemory {
 private:
-  int fd = -1;
-
-  bool delete_flag = true;
-  caddr_t memptr = nullptr;
-  sem_t *semptr = nullptr;
   std::string memory_name;
-  off_t byte_size = 0;
+  std::string sem_name;
+  int fd = -1;
+  char *memptr = nullptr;
+  char *main_memptr = nullptr;
+  sem_t *sem = nullptr;
+  bool creat_flag = false;
+  uint32_t size = 0;
+
+  size_t total_mapped_size() const { return size + 2 * sizeof(uint32_t); }
+
+  SharedMemory() {}
 
 public:
-  MemoryParent(const std::string &mem_name, off_t size,
-               const std::string &sem_name)
-      : memory_name(mem_name), byte_size(size) {
+  SharedMemory(std::string memory_name, uint32_t size, std::string sem_name,
+               bool creat_flag = true)
+      : memory_name(std::move(memory_name)), sem_name(std::move(sem_name)),
+        creat_flag(creat_flag), size(size) {
 
-    if (std::filesystem::exists("file.txt")) {
-      throw std::runtime_error(
-          "This shared memory is used by other instance of MemoryParent");
+    if (memory_name.empty() || memory_name[0] != '/') {
+      throw std::runtime_error("bad memory name");
     }
 
-    sem_t *sem = sem_open(sem_name.c_str(), O_EXCL);
-    if (sem == SEM_FAILED) {
-      if (errno == EEXIST) {
-        throw std::runtime_error(
-            "This semaphore is used by other instance of MemoryParent");
+    if (creat_flag) {
+      if ((fd = shm_open(memory_name.c_str(), O_RDWR | O_CREAT | O_EXCL,
+                         0644)) < 0) {
+        throw std::system_error(errno, std::generic_category(),
+                                "shm_open failed");
       }
-    }
 
-    fd = shm_open(memory_name.c_str(), O_RDWR | O_CREAT, 0664);
-    if (fd < 0) {
-      throw std::system_error(errno, std::generic_category(),
-                              "shm_open failed");
-    }
-    if (ftruncate(fd, byte_size) < 0) {
-      ::close(fd);
-
-      shm_unlink(memory_name.c_str());
-
-      throw std::system_error(errno, std::generic_category(),
-                              "ftruncate failed");
-    }
-    memptr = static_cast<caddr_t>(
-        mmap(nullptr, byte_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0));
-    if (memptr == MAP_FAILED) {
-      ::close(fd);
-
-      shm_unlink(memory_name.c_str());
-
-      throw std::system_error(errno, std::generic_category(), "mmap failed");
-    }
-    semptr = sem_open(sem_name.c_str(), O_CREAT, 0600, 1);
-    if (semptr == SEM_FAILED) {
-
-      shm_unlink(memory_name.c_str());
-
-      munmap(memptr, byte_size);
-      ::close(fd);
-      throw std::system_error(errno, std::generic_category(),
-                              "sem_open failed");
-    }
-  }
-  void safe_memory() { delete_flag = false; }
-  ~MemoryParent() {
-
-    if (semptr != nullptr && semptr != SEM_FAILED)
-      sem_close(semptr);
-    if (memptr != nullptr && memptr != MAP_FAILED)
-      munmap(memptr, byte_size);
-    if (fd >= 0)
-      ::close(fd);
-    if (!memory_name.empty())
-      if (delete_flag) {
+      if (ftruncate(fd, total_mapped_size()) < 0) {
+        close(fd);
         shm_unlink(memory_name.c_str());
+        throw std::system_error(errno, std::generic_category(),
+                                "ftruncate failed");
       }
+
+      sem = sem_open(sem_name.c_str(), O_CREAT | O_EXCL, 0644, 1);
+      if (sem == SEM_FAILED) {
+        shm_unlink(memory_name.c_str());
+        close(fd);
+        throw std::system_error(errno, std::generic_category(),
+                                "sem_open failed");
+      }
+
+      memptr =
+          static_cast<char *>(mmap(NULL, total_mapped_size(),
+                                   PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0));
+      if (memptr == MAP_FAILED) {
+        shm_unlink(memory_name.c_str());
+        close(fd);
+        sem_unlink(sem_name.c_str());
+        sem_close(sem);
+        throw std::system_error(errno, std::generic_category(), "bad mmap");
+      }
+
+      main_memptr = memptr;
+      memptr = main_memptr + sizeof(uint32_t);
+      memcpy(main_memptr, &size, sizeof(uint32_t));
+
+    } else {
+      if ((fd = shm_open(memory_name.c_str(), O_RDWR, 0)) < 0) {
+        throw std::system_error(errno, std::generic_category(),
+                                "shm_open failed");
+      }
+
+      sem = sem_open(sem_name.c_str(), 0);
+      if (sem == SEM_FAILED) {
+        close(fd);
+        throw std::system_error(errno, std::generic_category(),
+                                "sem_open failed");
+      }
+
+      memptr =
+          static_cast<char *>(mmap(NULL, total_mapped_size(),
+                                   PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0));
+      if (memptr == MAP_FAILED) {
+        close(fd);
+        sem_close(sem);
+        throw std::system_error(errno, std::generic_category(), "bad mmap");
+      }
+
+      main_memptr = memptr;
+      memptr = main_memptr + sizeof(uint32_t);
+
+      uint32_t real_size = 0;
+      memcpy(&real_size, main_memptr, sizeof(uint32_t));
+
+      if (real_size < size) {
+        munmap(main_memptr, total_mapped_size());
+        sem_close(sem);
+        close(fd);
+        throw std::runtime_error("Size of memory is less than requested size");
+      }
+    }
   }
 
-  MemoryParent(const MemoryParent &) = delete;
-  MemoryParent &operator=(const MemoryParent &) = delete;
+  ~SharedMemory() {
+    if (fd != -1) {
+      if (main_memptr != nullptr && main_memptr != MAP_FAILED) {
+        munmap(main_memptr, total_mapped_size());
+      }
+      if (sem != nullptr && sem != SEM_FAILED) {
+        sem_close(sem);
+      }
+      close(fd);
 
-  MemoryParent(MemoryParent &&other) noexcept
-      : fd(other.fd), memptr(other.memptr), semptr(other.semptr),
-        memory_name(std::move(other.memory_name)), byte_size(other.byte_size) {
-    other.fd = -1;
-    other.memptr = nullptr;
-    other.semptr = nullptr;
-    other.byte_size = 0;
+      if (creat_flag) {
+        shm_unlink(memory_name.c_str());
+        sem_unlink(sem_name.c_str());
+      }
+    }
   }
 
-  MemoryParent &operator=(MemoryParent &&other) noexcept {
+  void swap(SharedMemory &other) noexcept {
+    std::swap(memory_name, other.memory_name);
+    std::swap(sem_name, other.sem_name);
+    std::swap(creat_flag, other.creat_flag);
+    std::swap(sem, other.sem);
+    std::swap(memptr, other.memptr);
+    std::swap(fd, other.fd);
+    std::swap(size, other.size);
+    std::swap(main_memptr, other.main_memptr);
+  }
+
+  SharedMemory(const SharedMemory &) = delete;
+  SharedMemory &operator=(const SharedMemory &) = delete;
+
+  SharedMemory(SharedMemory &&other) noexcept { swap(other); }
+
+  SharedMemory &operator=(SharedMemory &&other) noexcept {
     if (this != &other) {
-      MemoryParent tmp(std::move(other));
-      swap(tmp);
+      swap(other);
     }
     return *this;
   }
 
-  void swap(MemoryParent &other) noexcept {
-
-    std::swap(fd, other.fd);
-    std::swap(memptr, other.memptr);
-    std::swap(semptr, other.semptr);
-    std::swap(byte_size, other.byte_size);
-    std::swap(memory_name, other.memory_name);
-  }
-
   void write_json(const json &data) {
-    if (sem_wait(semptr) < 0) {
-      throw std::system_error(errno, std::generic_category(),
-                              "sem_wait failed");
+    auto payload = data.dump();
+    uint32_t len = payload.size();
+    uint32_t max_size = 0;
+    memcpy(&max_size, main_memptr, sizeof(uint32_t));
+
+    if (len > max_size) {
+      throw std::runtime_error("payload size is bigger than memory size");
     }
-    try {
-      ::write_json(memptr, byte_size, data);
-      if (sem_post(semptr) < 0) {
-        throw std::system_error(errno, std::generic_category(),
-                                "sem_post failed");
+
+    if (sem_wait(sem) == 0) {
+      try {
+        memcpy(memptr, &len, sizeof(uint32_t));
+        memcpy(memptr + sizeof(uint32_t), payload.data(), len);
+        if (sem_post(sem) < 0) {
+          throw std::system_error(errno, std::generic_category(),
+                                  "bad sem_post");
+        }
+        return;
+      } catch (...) {
+        sem_post(sem);
+        throw;
       }
-    } catch (...) {
-      sem_post(semptr);
-      throw;
     }
+    throw std::system_error(errno, std::generic_category(), "bad sem_wait");
   }
+
   json read_json() {
-    json data;
-    if (sem_wait(semptr) < 0) {
-      throw std::system_error(errno, std::generic_category(),
-                              "sem_wait failed");
-    }
-    try {
-      data = ::read_json(memptr, byte_size);
+    if (sem_wait(sem) == 0) {
+      try {
+        uint32_t len = 0;
+        memcpy(&len, memptr, sizeof(uint32_t));
 
-      if (sem_post(semptr) < 0) {
-        throw std::system_error(errno, std::generic_category(),
-                                "sem_post failed");
+        if (len > size) {
+          throw std::runtime_error("bad buff len");
+        }
+
+        std::string payload;
+        payload.resize(len);
+        memcpy(payload.data(), memptr + sizeof(uint32_t), len);
+
+        if (sem_post(sem) < 0) {
+          throw std::system_error(errno, std::generic_category(),
+                                  "bad sem_post");
+        }
+        return json::parse(payload);
+      } catch (...) {
+        sem_post(sem);
+        throw;
       }
-    } catch (...) {
-      sem_post(semptr);
-      throw;
     }
-    return data;
-  }
-};
-
-class MemoryChild {
-private:
-  int fd = -1;
-  caddr_t memptr = nullptr;
-  sem_t *semptr = nullptr;
-  std::string memory_name;
-  off_t byte_size = 0;
-
-public:
-  MemoryChild(const std::string &mem_name, off_t size,
-              const std::string &sem_name)
-      : memory_name(mem_name), byte_size(size) {
-    fd = shm_open(memory_name.c_str(), O_RDWR, 0664);
-    if (fd < 0) {
-      throw std::system_error(errno, std::generic_category(),
-                              "shm_open failed");
-    }
-
-    memptr = static_cast<caddr_t>(
-        mmap(nullptr, byte_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0));
-    if (memptr == MAP_FAILED) {
-      ::close(fd);
-      throw std::system_error(errno, std::generic_category(), "mmap failed");
-    }
-    semptr = sem_open(sem_name.c_str(), 0);
-    if (semptr == SEM_FAILED) {
-      munmap(memptr, byte_size);
-      ::close(fd);
-      throw std::system_error(errno, std::generic_category(),
-                              "sem_open failed");
-    }
-  }
-
-  ~MemoryChild() {
-    if (semptr != nullptr && semptr != SEM_FAILED)
-      sem_close(semptr);
-    if (memptr != nullptr && memptr != MAP_FAILED)
-      munmap(memptr, byte_size);
-    if (fd >= 0)
-      ::close(fd);
-  }
-
-  MemoryChild(const MemoryChild &) = delete;
-  MemoryChild &operator=(const MemoryChild &) = delete;
-
-  MemoryChild(MemoryChild &&other) noexcept
-      : fd(other.fd), memptr(other.memptr), semptr(other.semptr),
-        memory_name(std::move(other.memory_name)), byte_size(other.byte_size) {
-    other.fd = -1;
-    other.memptr = nullptr;
-    other.semptr = nullptr;
-    other.byte_size = 0;
-  }
-
-  MemoryChild &operator=(MemoryChild &&other) noexcept {
-    if (this != &other) {
-      MemoryChild tmp(std::move(other));
-      swap(tmp);
-    }
-    return *this;
-  }
-
-  void swap(MemoryChild &other) noexcept {
-
-    std::swap(fd, other.fd);
-    std::swap(memptr, other.memptr);
-    std::swap(semptr, other.semptr);
-    std::swap(byte_size, other.byte_size);
-    std::swap(memory_name, other.memory_name);
-  }
-
-  void write_json(const json &data) {
-    if (sem_wait(semptr) < 0) {
-      throw std::system_error(errno, std::generic_category(),
-                              "sem_wait failed");
-    }
-    try {
-      ::write_json(memptr, byte_size, data);
-      if (sem_post(semptr) < 0) {
-        throw std::system_error(errno, std::generic_category(),
-                                "sem_post failed");
-      }
-    } catch (...) {
-      sem_post(semptr);
-      throw;
-    }
-  }
-  json read_json() {
-    json data;
-    if (sem_wait(semptr) < 0) {
-      throw std::system_error(errno, std::generic_category(),
-                              "sem_wait failed");
-    }
-    try {
-      data = ::read_json(memptr, byte_size);
-
-      if (sem_post(semptr) < 0) {
-        throw std::system_error(errno, std::generic_category(),
-                                "sem_post failed");
-      }
-    } catch (...) {
-      sem_post(semptr);
-      throw;
-    }
-    return data;
+    throw std::system_error(errno, std::generic_category(), "bad sem_wait");
   }
 };
 
