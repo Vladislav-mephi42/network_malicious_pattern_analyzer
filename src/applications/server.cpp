@@ -52,9 +52,24 @@ public:
   }
 };
 
+bool set_pdeathsig_or_die(int sig = SIGTERM) {
+  pid_t parent_before = getppid();
+  if (prctl(PR_SET_PDEATHSIG, sig) == -1) {
+    perror("prctl(PR_SET_PDEATHSIG)");
+    return false;
+  }
+  pid_t parent_after = getppid();
+  if (parent_after != parent_before || parent_after == 1) {
+    return false;
+  }
+  return true;
+}
+
 void handle_fifo() {
   try {
-    prctl(PR_SET_PDEATHSIG, SIGTERM);
+    if (!set_pdeathsig_or_die()) {
+      return;
+    }
     std::string w_path = "./1.fifo";
     std::string r_path = "./2.fifo";
     Fifo_file f_w(w_path);
@@ -62,7 +77,7 @@ void handle_fifo() {
     json data;
     data["counter"] = 0;
     auto size = data.dump().size() + 1024;
-    SharedMemory parent("/memory.shm", size, "/semophore.sem");
+    SharedMemory parent("/memory.shm", size, "/semophore.sem", true);
     parent.write_json(data);
 
     try {
@@ -81,7 +96,7 @@ void handle_fifo() {
         }
       }
     } catch (const std::exception &e) {
-      std::cout << e.what() << std::endl;
+      return;
     }
 
   } catch (...) {
@@ -98,7 +113,7 @@ void handle_client(Client_socket &socket, size_t size) {
       return;
     }
     int counter = data["counter"].get<int>();
-    SharedMemory child("/memory.shm", size, "/semophore.sem");
+    SharedMemory child("/memory.shm", size, "/semophore.sem", false);
     auto new_data = child.read_json();
     auto new_counter = new_data["counter"].get<int>();
     new_counter += counter;
@@ -106,7 +121,8 @@ void handle_client(Client_socket &socket, size_t size) {
     child.write_json(new_data);
     socket.send_json(new_data);
 
-  } catch (...) {
+  } catch (const std::exception &e) {
+    std::cout << e.what() << std::endl;
     return;
   }
   return;
@@ -155,6 +171,7 @@ int main() {
   auto pid_1 = fork();
   if (pid_1 == 0) {
     handle_fifo();
+    _exit(1);
   }
   try {
     json data;
@@ -170,16 +187,16 @@ int main() {
         client.manualy_close();
       }
       if (pid == 0) {
-
         server.manualy_close();
         handle_client(client, size);
-
-        return 0;
+        _exit(0);
       }
     }
 
   } catch (const std::exception &e) {
-    std::cout << e.what() << std::endl;
+    if (keep_running == 0) {
+      std::cout << e.what() << std::endl;
+    }
   }
   kill(pid_1, SIGTERM);
 
