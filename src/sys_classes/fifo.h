@@ -133,6 +133,7 @@ public:
                                 "mkfifo failed");
       }
       if ((fd = open(fifo_name.c_str(), O_RDONLY)) < 0) {
+        unlink(fifo_name.c_str());
         throw std::system_error(errno, std::generic_category(), "bad open");
       }
     } else {
@@ -146,10 +147,10 @@ public:
   }
   ~FIFOReader() {
     if (fd != -1) {
+      close(fd);
       if (delete_flag) {
         unlink(fifo_name.c_str());
       }
-      close(fd);
     }
   }
 
@@ -157,14 +158,15 @@ public:
   FIFOReader &operator=(FIFOReader &) = delete;
   FIFOReader(FIFOReader &&other) noexcept { swap(other); }
   FIFOReader &operator=(FIFOReader &&other) noexcept {
-    FIFOReader tmp(std::move(other));
-    swap(tmp);
+    if (this != &other) {
+      swap(other);
+    }
     return *this;
   }
 
   void read_n(void *data, size_t n) {
-    size_t total = 0;
-    size_t current = 0;
+    int total = 0;
+    int current = 0;
     while (current < n) {
 
       total = read(fd, static_cast<char *>(data) + current, n - current);

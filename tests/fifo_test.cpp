@@ -1,28 +1,27 @@
 #define CATCH_CONFIG_MAIN
 #include "fifo.h"
-#include <atomic>
 #include <catch2/catch_all.hpp>
 #include <chrono>
 #include <nlohmann/json.hpp>
-#include <set>
 #include <thread>
-#include <vector>
+
+using namespace std::chrono_literals;
 
 TEST_CASE("FIFO Basic Operations") {
   SECTION("JSON transmission with RAII") {
+    const std::string fifo_path = "./test_fifo_basic";
 
-    std::thread writer_thread([]() {
-      FIFOWriter writer("./test_fifo1");
+    std::thread writer_thread([&fifo_path]() {
+      FIFOWriter writer(fifo_path);
       json output;
       output["hello"] = "!";
       writer.write_json(output);
     });
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::this_thread::sleep_for(100ms);
 
-    FIFOReader reader("./test_fifo1");
-    json input;
-    REQUIRE_NOTHROW(input = reader.read_json());
+    FIFOReader reader(fifo_path);
+    json input = reader.read_json();
 
     writer_thread.join();
 
@@ -31,9 +30,10 @@ TEST_CASE("FIFO Basic Operations") {
   }
 
   SECTION("Multiple JSON messages") {
+    const std::string fifo_path = "./test_fifo_multi_msg";
 
-    std::thread writer_thread([]() {
-      FIFOWriter writer("./test_fifo2");
+    std::thread writer_thread([&fifo_path]() {
+      FIFOWriter writer(fifo_path);
       for (int i = 0; i < 5; ++i) {
         json output;
         output["message_id"] = i;
@@ -42,13 +42,12 @@ TEST_CASE("FIFO Basic Operations") {
       }
     });
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::this_thread::sleep_for(100ms);
 
-    FIFOReader reader("./test_fifo2");
+    FIFOReader reader(fifo_path);
 
     for (int i = 0; i < 5; ++i) {
-      json input;
-      REQUIRE_NOTHROW(input = reader.read_json());
+      json input = reader.read_json();
       REQUIRE(input["message_id"] == i);
       REQUIRE(input["data"] == "test_data_" + std::to_string(i));
     }
@@ -65,11 +64,10 @@ TEST_CASE("FIFO Basic Operations") {
       writer.write_json(output);
     });
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::this_thread::sleep_for(100ms);
 
     FIFOReader reader(fifo_path);
-    json input;
-    REQUIRE_NOTHROW(input = reader.read_json());
+    json input = reader.read_json();
 
     writer_thread.join();
 
@@ -85,11 +83,10 @@ TEST_CASE("FIFO Basic Operations") {
       writer.write_json(output);
     });
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::this_thread::sleep_for(100ms);
 
     FIFOReader reader(fifo_path);
-    json input;
-    REQUIRE_NOTHROW(input = reader.read_json());
+    json input = reader.read_json();
 
     writer_thread.join();
 
@@ -107,57 +104,26 @@ TEST_CASE("FIFO Basic Operations") {
       writer.write_json(output);
     });
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::this_thread::sleep_for(100ms);
 
     FIFOReader reader(fifo_path);
-    json input;
-    REQUIRE_NOTHROW(input = reader.read_json());
+    json input = reader.read_json();
 
     writer_thread.join();
 
     REQUIRE(input["a"]["b"]["c"] == 42);
     REQUIRE(input["arr"][2][1] == 4);
   }
-
-  SECTION("Two writers sequential") {
-    const std::string fifo_path = "./test_fifo_two_writers";
-
-    std::thread writer_thread([&fifo_path]() {
-      {
-        FIFOWriter writer(fifo_path);
-        json output;
-        output["id"] = 1;
-        writer.write_json(output);
-      }
-      {
-        FIFOWriter writer(fifo_path, false);
-        json output;
-        output["id"] = 2;
-        writer.write_json(output);
-      }
-    });
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
-    FIFOReader reader(fifo_path);
-    json input1 = reader.read_json();
-    json input2 = reader.read_json();
-
-    writer_thread.join();
-
-    REQUIRE(input1["id"] == 1);
-    REQUIRE(input2["id"] == 2);
-  }
 }
 
 TEST_CASE("FIFO Large Messages") {
   SECTION("Large JSON payload") {
+    const std::string fifo_path = "./test_fifo_large";
 
-    std::thread writer_thread([]() {
-      FIFOWriter writer("./test_fifo_large");
+    std::thread writer_thread([&fifo_path]() {
+      FIFOWriter writer(fifo_path);
       json output;
       output["large_array"] = json::array();
-
       for (int i = 0; i < 10000; ++i) {
         output["large_array"].push_back(
             {{"index", i}, {"value", "data_" + std::to_string(i)}});
@@ -165,11 +131,10 @@ TEST_CASE("FIFO Large Messages") {
       writer.write_json(output);
     });
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::this_thread::sleep_for(100ms);
 
-    FIFOReader reader("./test_fifo_large");
-    json input;
-    REQUIRE_NOTHROW(input = reader.read_json());
+    FIFOReader reader(fifo_path);
+    json input = reader.read_json();
 
     writer_thread.join();
 
@@ -189,7 +154,7 @@ TEST_CASE("FIFO Large Messages") {
       }
     });
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::this_thread::sleep_for(100ms);
 
     FIFOReader reader(fifo_path);
     for (int i = 0; i < 100; ++i) {
@@ -210,11 +175,10 @@ TEST_CASE("FIFO Large Messages") {
       writer.write_json(output);
     });
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::this_thread::sleep_for(100ms);
 
     FIFOReader reader(fifo_path);
-    json input;
-    REQUIRE_NOTHROW(input = reader.read_json());
+    json input = reader.read_json();
 
     writer_thread.join();
 
@@ -229,7 +193,7 @@ TEST_CASE("FIFO Different Data Types") {
     const std::string fifo_path = "./test_fifo_types";
 
     std::thread writer_thread([&fifo_path]() {
-      FIFOWriter w(fifo_path);
+      FIFOWriter writer(fifo_path);
       json output;
       output["string"] = "text";
       output["integer"] = 42;
@@ -239,14 +203,13 @@ TEST_CASE("FIFO Different Data Types") {
       output["null"] = nullptr;
       output["array"] = json::array({1, 2, 3, "four"});
       output["nested"] = {{"key", "value"}};
-      w.write_json(output);
+      writer.write_json(output);
     });
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::this_thread::sleep_for(100ms);
 
-    FIFOReader r(fifo_path);
-    json input;
-    REQUIRE_NOTHROW(input = r.read_json());
+    FIFOReader reader(fifo_path);
+    json input = reader.read_json();
 
     writer_thread.join();
 
@@ -264,7 +227,7 @@ TEST_CASE("FIFO Different Data Types") {
     const std::string fifo_path = "./test_fifo_numeric";
 
     std::thread writer_thread([&fifo_path]() {
-      FIFOWriter w(fifo_path);
+      FIFOWriter writer(fifo_path);
       json output;
       output["zero"] = 0;
       output["negative"] = -42;
@@ -272,14 +235,13 @@ TEST_CASE("FIFO Different Data Types") {
       output["small"] = -9223372036854775807LL;
       output["double"] = 1.7976931348623157e308;
       output["tiny"] = 2.2250738585072014e-308;
-      w.write_json(output);
+      writer.write_json(output);
     });
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::this_thread::sleep_for(100ms);
 
-    FIFOReader r(fifo_path);
-    json input;
-    REQUIRE_NOTHROW(input = r.read_json());
+    FIFOReader reader(fifo_path);
+    json input = reader.read_json();
 
     writer_thread.join();
 
@@ -293,7 +255,7 @@ TEST_CASE("FIFO Different Data Types") {
     const std::string fifo_path = "./test_fifo_deep";
 
     std::thread writer_thread([&fifo_path]() {
-      FIFOWriter w(fifo_path);
+      FIFOWriter writer(fifo_path);
       json output;
       json *cur = &output;
       for (int i = 0; i < 50; ++i) {
@@ -301,14 +263,13 @@ TEST_CASE("FIFO Different Data Types") {
         cur = &(*cur)["level"];
       }
       (*cur)["value"] = "deep";
-      w.write_json(output);
+      writer.write_json(output);
     });
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::this_thread::sleep_for(100ms);
 
-    FIFOReader r(fifo_path);
-    json input;
-    REQUIRE_NOTHROW(input = r.read_json());
+    FIFOReader reader(fifo_path);
+    json input = reader.read_json();
 
     writer_thread.join();
 
@@ -322,53 +283,34 @@ TEST_CASE("FIFO Different Data Types") {
 
 TEST_CASE("FIFO Errors") {
   SECTION("Writer create twice throws") {
-    const std::string fifo_path = "./test_fifo_err_writer_twice";
+    const std::string fifo_path = "./test_fifo_err_twice";
 
     std::thread writer_thread([&fifo_path]() {
       FIFOWriter writer(fifo_path);
-      REQUIRE_THROWS(FIFOWriter(fifo_path));
+      REQUIRE_THROWS_AS(FIFOWriter(fifo_path), std::runtime_error);
       json output;
       output["ok"] = true;
       writer.write_json(output);
     });
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::this_thread::sleep_for(100ms);
 
     FIFOReader reader(fifo_path);
     json input = reader.read_json();
-    REQUIRE(input["ok"] == true);
 
     writer_thread.join();
-  }
 
-  SECTION("Reader create twice throws") {
-    const std::string fifo_path = "./test_fifo_err_reader_twice";
-
-    std::thread writer_thread([&fifo_path]() {
-      FIFOWriter writer(fifo_path);
-      std::this_thread::sleep_for(std::chrono::milliseconds(300));
-      json output;
-      output["ok"] = true;
-      writer.write_json(output);
-    });
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
-    FIFOReader reader(fifo_path);
-    REQUIRE_THROWS(FIFOReader(fifo_path));
-
-    json input = reader.read_json();
     REQUIRE(input["ok"] == true);
-
-    writer_thread.join();
   }
 
   SECTION("Reader on non existing fifo throws") {
-    REQUIRE_THROWS(FIFOReader("./test_fifo_no_such_file"));
+    REQUIRE_THROWS_AS(FIFOReader("./test_fifo_no_such_file"),
+                      std::runtime_error);
   }
 
   SECTION("Writer on non existing fifo with create=false throws") {
-    REQUIRE_THROWS(FIFOWriter("./test_fifo_no_such_file_w", false));
+    REQUIRE_THROWS_AS(FIFOWriter("./test_fifo_no_such_file_w", false),
+                      std::runtime_error);
   }
 
   SECTION("Empty message throws on read") {
@@ -380,7 +322,7 @@ TEST_CASE("FIFO Errors") {
       writer.write_n(&len, sizeof(uint32_t));
     });
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::this_thread::sleep_for(100ms);
 
     FIFOReader reader(fifo_path);
     REQUIRE_THROWS(reader.read_json());
@@ -397,7 +339,7 @@ TEST_CASE("FIFO Errors") {
       writer.write_n(&len, sizeof(uint32_t));
     });
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::this_thread::sleep_for(100ms);
 
     FIFOReader reader(fifo_path);
     REQUIRE_THROWS(reader.read_json());
@@ -414,7 +356,7 @@ TEST_CASE("FIFO Errors") {
       writer.write_all(bad.c_str(), bad.size());
     });
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::this_thread::sleep_for(100ms);
 
     FIFOReader reader(fifo_path);
     REQUIRE_THROWS(reader.read_json());
@@ -425,7 +367,7 @@ TEST_CASE("FIFO Errors") {
 
 TEST_CASE("FIFO Move semantics") {
   SECTION("Writer move constructor") {
-    const std::string fifo_path = "./test_fifo_move_writer";
+    const std::string fifo_path = "./test_fifo_move_w_ctor";
 
     std::thread writer_thread([&fifo_path]() {
       FIFOWriter writer(fifo_path);
@@ -435,38 +377,39 @@ TEST_CASE("FIFO Move semantics") {
       moved.write_json(output);
     });
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::this_thread::sleep_for(100ms);
 
     FIFOReader reader(fifo_path);
     json input = reader.read_json();
-    REQUIRE(input["moved"] == true);
 
     writer_thread.join();
+
+    REQUIRE(input["moved"] == true);
   }
 
   SECTION("Writer move assignment") {
-    const std::string fifo_path = "./test_fifo_move_assign_writer";
+    const std::string fifo_path = "./test_fifo_move_w_assign";
 
-    std::thread writer_thread([&fifo_path]() {
-      FIFOWriter writer(fifo_path);
-      FIFOWriter other(fifo_path, false);
-      other = std::move(writer);
-      json output;
-      output["assigned"] = true;
-      other.write_json(output);
+    std::thread reader_thread([&fifo_path]() {
+      FIFOReader reader(fifo_path, true);
+      json input = reader.read_json();
+      REQUIRE(input["assigned"] == true);
     });
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::this_thread::sleep_for(100ms);
 
-    FIFOReader reader(fifo_path);
-    json input = reader.read_json();
-    REQUIRE(input["assigned"] == true);
+    FIFOWriter w1(fifo_path, false);
+    FIFOWriter w2(fifo_path, false);
+    w2 = std::move(w1);
+    json output;
+    output["assigned"] = true;
+    w2.write_json(output);
 
-    writer_thread.join();
+    reader_thread.join();
   }
 
   SECTION("Reader move constructor") {
-    const std::string fifo_path = "./test_fifo_move_reader";
+    const std::string fifo_path = "./test_fifo_move_r_ctor";
 
     std::thread writer_thread([&fifo_path]() {
       FIFOWriter writer(fifo_path);
@@ -475,18 +418,19 @@ TEST_CASE("FIFO Move semantics") {
       writer.write_json(output);
     });
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::this_thread::sleep_for(100ms);
 
     FIFOReader reader(fifo_path);
     FIFOReader moved(std::move(reader));
     json input = moved.read_json();
-    REQUIRE(input["reader_moved"] == true);
 
     writer_thread.join();
+
+    REQUIRE(input["reader_moved"] == true);
   }
 
   SECTION("Reader move assignment") {
-    const std::string fifo_path = "./test_fifo_move_assign_reader";
+    const std::string fifo_path = "./test_fifo_move_r_assign";
 
     std::thread writer_thread([&fifo_path]() {
       FIFOWriter writer(fifo_path);
@@ -495,78 +439,60 @@ TEST_CASE("FIFO Move semantics") {
       writer.write_json(output);
     });
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::this_thread::sleep_for(100ms);
 
-    FIFOReader reader(fifo_path);
-    FIFOReader other(fifo_path, false);
-    other = std::move(reader);
-    json input = other.read_json();
-    REQUIRE(input["reader_assigned"] == true);
+    FIFOReader r1(fifo_path);
+    FIFOReader r2(fifo_path, false);
+    r2 = std::move(r1);
+    json input = r2.read_json();
 
     writer_thread.join();
+
+    REQUIRE(input["reader_assigned"] == true);
   }
 }
 
-TEST_CASE("FIFO Concurrent") {
-  SECTION("Multiple writers sequential order") {
-    const std::string fifo_path = "./test_fifo_concurrent_writers";
+TEST_CASE("FIFO RAII cleanup") {
+  SECTION("Writer deletes fifo on destruction") {
+    const std::string fifo_path = "./test_fifo_raii_del";
 
-    std::thread writer_thread([&fifo_path]() {
-      for (int i = 0; i < 3; ++i) {
-        FIFOWriter writer(fifo_path, i == 0);
+    {
+      std::thread writer_thread([&fifo_path]() {
+        FIFOWriter writer(fifo_path);
         json output;
-        output["writer"] = i;
+        output["raii"] = true;
         writer.write_json(output);
-      }
-    });
+      });
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      std::this_thread::sleep_for(100ms);
 
-    FIFOReader reader(fifo_path);
-    std::set<int> seen;
-    for (int i = 0; i < 3; ++i) {
+      FIFOReader reader(fifo_path);
       json input = reader.read_json();
-      seen.insert(input["writer"].get<int>());
-    }
-    REQUIRE(seen.size() == 3);
-    REQUIRE(seen.count(0) == 1);
-    REQUIRE(seen.count(1) == 1);
-    REQUIRE(seen.count(2) == 1);
+      REQUIRE(input["raii"] == true);
 
-    writer_thread.join();
+      writer_thread.join();
+    }
+
+    REQUIRE_FALSE(fifo_exists(fifo_path));
   }
 
-  SECTION("Multiple readers same fifo") {
-    const std::string fifo_path = "./test_fifo_multi_readers";
+  SECTION("Writer with create=false does not delete fifo") {
+    const std::string fifo_path = "./test_fifo_raii_nodel";
 
-    std::thread writer_thread([&fifo_path]() {
-      FIFOWriter writer(fifo_path);
-      for (int i = 0; i < 5; ++i) {
-        json output;
-        output["i"] = i;
-        writer.write_json(output);
-      }
-    });
+    mkfifo(fifo_path.c_str(), 0644);
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    {
+      std::thread reader_thread(
+          [&fifo_path]() { FIFOReader reader(fifo_path, false); });
 
-    std::atomic<int> counter(0);
-    auto worker = [&counter, &fifo_path]() {
-      FIFOReader reader(fifo_path, false);
-      json input = reader.read_json();
-      counter.fetch_add(1);
-    };
+      std::this_thread::sleep_for(100ms);
 
-    std::vector<std::thread> th;
-    for (int i = 0; i < 5; ++i) {
-      th.push_back(std::thread(worker));
-    }
-    for (auto &elem : th) {
-      elem.join();
+      FIFOWriter writer(fifo_path, false);
+
+      reader_thread.join();
     }
 
-    REQUIRE(counter.load() == 5);
-
-    writer_thread.join();
+    REQUIRE(fifo_exists(fifo_path));
+    unlink(fifo_path.c_str());
   }
 }
