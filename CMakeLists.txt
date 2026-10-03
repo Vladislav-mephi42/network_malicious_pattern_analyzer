@@ -24,7 +24,14 @@ FetchContent_Declare(
     GIT_TAG        v3.5.0
 )
 
-FetchContent_MakeAvailable(json catch2)
+FetchContent_Declare(
+    libtins
+    GIT_REPOSITORY https://github.com/mfontanini/libtins.git
+    GIT_TAG        v4.5  
+)
+
+
+FetchContent_MakeAvailable(json catch2 libtins)
 
 add_executable(server_app ${SRC}/applications/server.cpp)
 target_link_libraries(server_app PRIVATE Catch2::Catch2WithMain)
@@ -34,6 +41,8 @@ target_include_directories(server_app PRIVATE ${SRC}/sys_classes)
 add_executable(client_app ${SRC}/applications/client.cpp)
 target_link_libraries(client_app PRIVATE Catch2::Catch2WithMain)
 target_link_libraries(client_app PRIVATE nlohmann_json::nlohmann_json)
+target_include_directories(client_app PRIVATE ${libtins_SOURCE_DIR}/include)
+target_link_libraries(client_app PRIVATE tins)
 target_include_directories(client_app PRIVATE ${SRC}/sys_classes)
 
 add_executable(admin_app ${SRC}/applications/admin.cpp)
