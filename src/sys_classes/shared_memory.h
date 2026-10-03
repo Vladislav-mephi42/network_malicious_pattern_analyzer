@@ -35,13 +35,21 @@ private:
   SharedMemory() {}
 
 public:
-  SharedMemory(std::string memory_name, uint32_t size, std::string sem_name,
-               bool creat_flag = true)
-      : memory_name(std::move(memory_name)), sem_name(std::move(sem_name)),
-        creat_flag(creat_flag), size(size) {
+  SharedMemory(const std::string &memory_name, uint32_t size,
+               const std::string &sem_name, bool creat_flag = true)
+      : memory_name(memory_name), sem_name(sem_name), creat_flag(creat_flag),
+        size(size) {
 
     if (memory_name.empty() || memory_name[0] != '/') {
+
       throw std::runtime_error("bad memory name");
+    }
+    if (sem_name.empty() || sem_name[0] != '/') {
+
+      throw std::runtime_error("bad sem name");
+    }
+    if (size == 0) {
+      throw std::runtime_error("bad size");
     }
 
     if (creat_flag) {
