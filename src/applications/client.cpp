@@ -24,11 +24,24 @@
 #include <sys/wait.h>
 #include <system_error>
 #include <time.h>
+#include <tins/tins.h>
 #include <unistd.h>
 
 using json = nlohmann::json;
+using namespace Tins;
 
-int main() {
+bool handle_func(const PDU &pdu) { return true; }
+int main(int argc, char **argv) {
+
+  std::string iface = (argc > 1) ? argv[1] : "eth0";
+  std::string filter = (argc > 2) ? argv[2] : "ip";
+  SnifferConfiguration cfg;
+  cfg.set_promisc_mode(true);
+  cfg.set_immediate_mode(true);
+  cfg.set_snap_len(65535);
+  cfg.set_filter(filter);
+  Sniffer sniffer(iface, cfg);
+  sniffer.sniff_loop(handle_func);
   Client_socket client;
   client.connect("127.0.0.1", 7009);
   json data;
