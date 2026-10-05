@@ -1,3 +1,5 @@
+#include "../net_classes/net_logger.h"
+#include "../net_classes/net_sniffer.h"
 #include "../sys_classes/fifo.h"
 #include "../sys_classes/shared_memory.h"
 #include "../sys_classes/sockets.h"
@@ -32,29 +34,27 @@ using namespace Tins;
 
 bool handle_func(const PDU &pdu) { return true; }
 int main(int argc, char **argv) {
+  try {
+    std::string iface = (argc > 1) ? argv[1] : "lo";
+    std::string filter = (argc > 2) ? argv[2] : "tcp";
+    NetLogger logger;
+    NetSniffer sniffer(iface, filter, 6, logger);
+    sniffer.run();
+    json data = sniffer.get_data();
+    std::cout << data.dump(4) << std::endl;
 
-  std::string iface = (argc > 1) ? argv[1] : "eth0";
-  std::string filter = (argc > 2) ? argv[2] : "ip";
-  SnifferConfiguration cfg;
-  cfg.set_promisc_mode(true);
-  cfg.set_immediate_mode(true);
-  cfg.set_snap_len(65535);
-  cfg.set_filter(filter);
-  Sniffer sniffer(iface, cfg);
-  sniffer.sniff_loop(handle_func);
-  Client_socket client;
-  client.connect("127.0.0.1", 7009);
-  json data;
-  int counter = 0;
-  std::cout << "Enter number: " << std::flush;
-  std::cin >> counter;
-  std::cout << std::endl;
-  data["counter"] = counter;
-  client.send_json(data);
-  auto new_data = client.recv_json();
+    Client_socket client;
+    client.connect("127.0.0.1", 7009);
 
-  std::cout << "Counter from client: " << counter << std::endl;
-  std::cout << "Counter from server: " << new_data["counter"].get<int>()
-            << std::endl;
-  std::cout << std::endl;
+    client.send_json(data);
+    auto new_data = client.recv_json();
+    std::cout << std::endl;
+    std::cout << std::endl;
+    std::cout << std::endl;
+
+    std::cout << "Data from server: " << new_data << std::endl;
+    std::cout << std::endl;
+  } catch (const std::exception &e) {
+    std::cout << e.what() << std::endl;
+  }
 }

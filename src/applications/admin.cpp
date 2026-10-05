@@ -32,13 +32,13 @@ int main() {
   std::string w_path = "./2.fifo";
   std::string r_path = "./1.fifo";
   {
-    FIFOWriter writer(w_path, true);
+    FIFOWriter writer(w_path, false);
     json data;
     data["global_stat"] = "yes";
     writer.write_json(data);
   }
   {
-    FIFOReader reader(r_path, true);
+    FIFOReader reader(r_path, false);
     auto res = reader.read_json();
     std::cout << res.dump() << std::endl;
   }

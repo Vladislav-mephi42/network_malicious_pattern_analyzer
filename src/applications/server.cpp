@@ -1,3 +1,4 @@
+#include "../net_classes/net_check.h"
 #include "../sys_classes/fifo.h"
 #include "../sys_classes/shared_memory.h"
 #include "../sys_classes/sockets.h"
@@ -31,6 +32,7 @@
 using json = nlohmann::json;
 volatile sig_atomic_t keep_running = 0;
 volatile sig_atomic_t keep_fifo_running = 0;
+constexpr size_t size = 500 * 40;
 
 class Fifo_file {
 private:
@@ -70,13 +72,14 @@ void handle_fifo() {
     if (!set_pdeathsig_or_die()) {
       return;
     }
+
     std::string w_path = "./1.fifo";
     std::string r_path = "./2.fifo";
     Fifo_file f_w(w_path);
     Fifo_file f_r(r_path);
     json data;
-    data["counter"] = 0;
-    auto size = data.dump().size() + 1024;
+    data["base"] = 0;
+
     SharedMemory parent("/memory.shm", size, "/semophore.sem", true);
     parent.write_json(data);
 
@@ -107,17 +110,31 @@ void handle_fifo() {
 
 void handle_client(Client_socket &socket, size_t size) {
   try {
-    auto data = socket.recv_json();
-    if (!data.contains("counter")) {
-      std::cout << "fail" << std::endl;
-      return;
-    }
-    int counter = data["counter"].get<int>();
+    std::vector<std::shared_ptr<CheckStrategy>> checks;
+    ToMuchSYNCheck check_1(1);
+    checks.push_back(std::make_shared<ToMuchSYNCheck>(check_1));
+    ToMuchSYNCheckWithSameIP check_2(1);
+    checks.push_back(std::make_shared<ToMuchSYNCheckWithSameIP>(check_2));
+    auto recv_data = socket.recv_json();
+
     SharedMemory child("/memory.shm", size, "/semophore.sem", false);
     auto new_data = child.read_json();
-    auto new_counter = new_data["counter"].get<int>();
-    new_counter += counter;
-    new_data["counter"] = new_counter;
+
+    for (const auto &check : checks) {
+      if (check->can_check(recv_data)) {
+        json data_array = check->check(recv_data);
+        for (const auto &data : data_array) {
+          if (new_data.contains(data["header"])) {
+            int n = new_data[data["header"]];
+            n++;
+            new_data[data["header"]] = n;
+          } else {
+            new_data[data["header"]] = 1;
+          }
+        }
+      }
+    }
+
     child.write_json(new_data);
     socket.send_json(new_data);
 
@@ -168,20 +185,24 @@ int main() {
     std::cout << "Error with sigaction" << std::endl;
   }
 
+  std::cout << "Start working..." << std::endl;
+
   auto pid_1 = fork();
   if (pid_1 == 0) {
     handle_fifo();
-    _exit(1);
+    exit(1);
   }
+  std::cout << "Create fifo handle process" << std::endl;
   try {
     json data;
     data["counter"] = 0;
-    auto size = data.dump().size() + 1024;
+
     Server_socket server;
     server.bind(7009);
     server.listen(2);
     while (keep_running == 0) {
       auto client = server.accept();
+      std::cout << "accept client" << std::endl;
       auto pid = fork();
       if (pid > 0) {
         client.manualy_close();
@@ -189,7 +210,7 @@ int main() {
       if (pid == 0) {
         server.manualy_close();
         handle_client(client, size);
-        _exit(0);
+        exit(0);
       }
     }
 
