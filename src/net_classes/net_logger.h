@@ -10,23 +10,23 @@ using namespace Tins;
 
 class LogStrategy {
 public:
-  virtual bool can_log(const PDU &pdu) const noexcept = 0;
+  virtual bool can_log(const PDU &pdu) const = 0;
   virtual json log(const PDU &pdu) const = 0;
-  virtual ~LogStrategy();
+  virtual ~LogStrategy() = default;
 };
 
 class TCPLog : public LogStrategy {
-  const PDU *tcp = nullptr;
 
 public:
   virtual bool can_log(const PDU &pdu) const override {
-    tcp = pdu.find_pdu<TCP>();
+    auto tcp = pdu.find_pdu<TCP>();
     if (tcp == nullptr) {
       return false;
     }
     return true;
   }
   virtual json log(const PDU &pdu) const override {
+    auto tcp = pdu.find_pdu<TCP>();
     if (tcp == nullptr) {
       tcp = pdu.find_pdu<TCP>();
       if (tcp == nullptr) {
@@ -50,15 +50,15 @@ public:
 
     uint8_t flags = tcp->flags();
     info["flags"]["raw"] = flags;
-    info["flags"]["FIN"] = tcp->get_flag(TCP::FIN);
-    info["flags"]["SYN"] = tcp->get_flag(TCP::SYN);
-    info["flags"]["RST"] = tcp->get_flag(TCP::RST);
-    info["flags"]["PSH"] = tcp->get_flag(TCP::PSH);
-    info["flags"]["ACK"] = tcp->get_flag(TCP::ACK);
-    info["flags"]["URG"] = tcp->get_flag(TCP::URG);
-    info["flags"]["ECE"] = tcp->get_flag(TCP::ECE);
-    info["flags"]["CWR"] = tcp->get_flag(TCP::CWR);
-    info["flags"]["NS"] = tcp->get_flag(TCP::NS);
+    info["flags"]["FIN"] = static_cast<bool>(tcp->get_flag(TCP::FIN));
+    info["flags"]["SYN"] = static_cast<bool>(tcp->get_flag(TCP::SYN));
+    info["flags"]["RST"] = static_cast<bool>(tcp->get_flag(TCP::RST));
+    info["flags"]["PSH"] = static_cast<bool>(tcp->get_flag(TCP::PSH));
+    info["flags"]["ACK"] = static_cast<bool>(tcp->get_flag(TCP::ACK));
+    info["flags"]["URG"] = static_cast<bool>(tcp->get_flag(TCP::URG));
+    info["flags"]["ECE"] = static_cast<bool>(tcp->get_flag(TCP::ECE));
+    info["flags"]["CWR"] = static_cast<bool>(tcp->get_flag(TCP::CWR));
+
     return info;
   }
   ~TCPLog() override {}
@@ -69,6 +69,10 @@ private:
   std::vector<std::shared_ptr<LogStrategy>> strategies;
 
 public:
+  NetLogger() {
+    TCPLog tcp;
+    strategies.push_back(std::make_shared<TCPLog>(tcp));
+  }
   NetLogger(const std::vector<std::shared_ptr<LogStrategy>> &strategies)
       : strategies(strategies) {}
   json log(const PDU &pdu) {
