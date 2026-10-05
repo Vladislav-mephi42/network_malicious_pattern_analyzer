@@ -1,3 +1,4 @@
+#include "../net_classes/net_check.h"
 #include "../sys_classes/fifo.h"
 #include "../sys_classes/shared_memory.h"
 #include "../sys_classes/sockets.h"
@@ -29,61 +30,119 @@
 #include <unistd.h>
 
 using json = nlohmann::json;
+volatile sig_atomic_t keep_running = 0;
+volatile sig_atomic_t keep_fifo_running = 0;
+constexpr size_t size = 500 * 40;
+
+class Fifo_file {
+private:
+  std::string fifo_name;
+
+public:
+  Fifo_file(const std::string &fifo_name) : fifo_name(fifo_name) {
+    if (!fifo_exists(fifo_name)) {
+      if (mkfifo(fifo_name.c_str(), 0666) != 0) {
+        throw std::system_error(errno, std::generic_category(),
+                                "Failed to create FIFO");
+      }
+    }
+  }
+  ~Fifo_file() {
+    if (fifo_exists(fifo_name)) {
+      unlink(fifo_name.c_str());
+    }
+  }
+};
+
+bool set_pdeathsig_or_die(int sig = SIGTERM) {
+  pid_t parent_before = getppid();
+  if (prctl(PR_SET_PDEATHSIG, sig) == -1) {
+    perror("prctl(PR_SET_PDEATHSIG)");
+    return false;
+  }
+  pid_t parent_after = getppid();
+  if (parent_after != parent_before || parent_after == 1) {
+    return false;
+  }
+  return true;
+}
 
 void handle_fifo() {
   try {
-    prctl(PR_SET_PDEATHSIG, SIGTERM);
-    json data;
-    data["counter"] = 0;
-    auto size = data.dump().size() + 1024;
-    MemoryParent parent("/memory.shm", size, "/semophore.sem");
-    parent.write_json(data);
-    try {
-      while (true) {
-        std::string w_path = "./1.fifo";
-        {
+    if (!set_pdeathsig_or_die()) {
+      return;
+    }
 
-          std::string r_path = "./2.fifo";
-          FIFOReader reader(r_path, true);
+    std::string w_path = "./1.fifo";
+    std::string r_path = "./2.fifo";
+    Fifo_file f_w(w_path);
+    Fifo_file f_r(r_path);
+    json data;
+    data["base"] = 0;
+
+    SharedMemory parent("/memory.shm", size, "/semophore.sem", true);
+    parent.write_json(data);
+
+    try {
+      while (keep_fifo_running == 0) {
+        {
+          FIFOReader reader(r_path, false);
           auto data = reader.read_json();
           if (!data.contains("global_stat")) {
             throw std::runtime_error("Bad fifo message");
           }
         }
         {
-          FIFOWriter writer(w_path, true);
+          FIFOWriter writer(w_path, false);
           auto message = parent.read_json();
           writer.write_json(message);
         }
       }
     } catch (const std::exception &e) {
-      std::cout << e.what() << std::endl;
+      return;
     }
-    _exit(0);
+
   } catch (...) {
-    _exit(1);
+    return;
   }
+  return;
 }
 
 void handle_client(Client_socket &socket, size_t size) {
   try {
-    auto data = socket.recv_json();
-    if (!data.contains("counter")) {
-      std::cout << "fail" << std::endl;
-      return;
-    }
-    int counter = data["counter"].get<int>();
-    MemoryChild child("/memory.shm", size, "/semophore.sem");
+    std::vector<std::shared_ptr<CheckStrategy>> checks;
+    ToMuchSYNCheck check_1(1);
+    checks.push_back(std::make_shared<ToMuchSYNCheck>(check_1));
+    ToMuchSYNCheckWithSameIP check_2(1);
+    checks.push_back(std::make_shared<ToMuchSYNCheckWithSameIP>(check_2));
+    auto recv_data = socket.recv_json();
+
+    SharedMemory child("/memory.shm", size, "/semophore.sem", false);
     auto new_data = child.read_json();
-    auto new_counter = new_data["counter"].get<int>();
-    new_counter += counter;
-    new_data["counter"] = new_counter;
+
+    for (const auto &check : checks) {
+      if (check->can_check(recv_data)) {
+        json data_array = check->check(recv_data);
+        for (const auto &data : data_array) {
+          if (new_data.contains(data["header"])) {
+            int n = new_data[data["header"]];
+            n++;
+            new_data[data["header"]] = n;
+          } else {
+            new_data[data["header"]] = 1;
+          }
+        }
+      }
+    }
+
     child.write_json(new_data);
     socket.send_json(new_data);
-    exit(0);
-  } catch (...) {
-    _exit(1);
+
+  } catch (const std::exception &e) {
+    std::cout << e.what() << std::endl;
+    return;
   }
+  return;
 }
 
 void sigchld_handler(int sig) {
@@ -92,8 +151,15 @@ void sigchld_handler(int sig) {
 }
 
 void sigint_handler(int sig) {
-  std::cout << "Finish work......" << std::endl;
-  _exit(0);
+  std::string finish = "Finish work......\n";
+  write(1, finish.c_str(), strlen(finish.c_str()));
+  keep_running = 1;
+  keep_fifo_running = 1;
+}
+
+void sigterm_handler(int sig) {
+  keep_running = 1;
+  keep_fifo_running = 1;
 }
 
 int main() {
@@ -106,38 +172,61 @@ int main() {
     return 1;
   }
   sa.sa_handler = sigint_handler;
-  sa.sa_flags = SA_RESTART;
+  sa.sa_flags = 0;
   sigemptyset(&sa.sa_mask);
   if (sigaction(SIGINT, &sa, nullptr) == -1) {
     std::cout << "Error with sigaction" << std::endl;
   }
+
+  sa.sa_handler = sigterm_handler;
+  sa.sa_flags = 0;
+  sigemptyset(&sa.sa_mask);
+  if (sigaction(SIGTERM, &sa, nullptr) == -1) {
+    std::cout << "Error with sigaction" << std::endl;
+  }
+
+  std::cout << "Start working..." << std::endl;
+
   auto pid_1 = fork();
   if (pid_1 == 0) {
     handle_fifo();
+    exit(1);
   }
+  std::cout << "Create fifo handle process" << std::endl;
   try {
     json data;
     data["counter"] = 0;
-    auto size = data.dump().size() + 1024;
+
     Server_socket server;
     server.bind(7009);
     server.listen(2);
-    while (true) {
+    while (keep_running == 0) {
       auto client = server.accept();
+      std::cout << "accept client" << std::endl;
       auto pid = fork();
       if (pid > 0) {
         client.manualy_close();
       }
       if (pid == 0) {
-
         server.manualy_close();
         handle_client(client, size);
-
-        return 0;
+        exit(0);
       }
     }
 
   } catch (const std::exception &e) {
-    std::cout << e.what() << std::endl;
+    if (keep_running == 0) {
+      std::cout << e.what() << std::endl;
+    }
   }
+  kill(pid_1, SIGTERM);
+
+  struct sigaction sa_default = {};
+  sa_default.sa_handler = SIG_DFL;
+  sigaction(SIGCHLD, &sa_default, nullptr);
+
+  while (waitpid(-1, nullptr, 0) > 0 || errno == EINTR) {
+  }
+
+  return 0;
 }
