@@ -115,6 +115,8 @@ void handle_client(Client_socket &socket, size_t size) {
     checks.push_back(std::make_shared<ToMuchSYNCheck>(check_1));
     ToMuchSYNCheckWithSameIP check_2(1);
     checks.push_back(std::make_shared<ToMuchSYNCheckWithSameIP>(check_2));
+    ICMPDDosCheck check_3(1);
+    checks.push_back(std::make_shared<ICMPDDosCheck>(check_3));
     auto recv_data = socket.recv_json();
 
     SharedMemory child("/memory.shm", size, "/semophore.sem", false);
