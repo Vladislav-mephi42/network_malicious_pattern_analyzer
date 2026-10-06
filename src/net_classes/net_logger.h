@@ -111,6 +111,37 @@ public:
   ~TCPIPLog() override {}
 };
 
+class ICMPLog : public LogStrategy {
+
+public:
+  virtual bool can_log(const PDU &pdu) const override {
+    auto icmp = pdu.find_pdu<ICMP>();
+    auto ip = pdu.find_pdu<IP>();
+
+    if (icmp == nullptr || ip == nullptr) {
+      return false;
+    }
+    return true;
+  }
+  virtual json log(const PDU &pdu) const override {
+    auto icmp = pdu.find_pdu<ICMP>();
+    auto ip = pdu.find_pdu<IP>();
+
+    if (icmp == nullptr || ip == nullptr) {
+
+      throw std::runtime_error("logging failed");
+    }
+    json info;
+
+    info["protocol"] = "ICMP";
+    info["type"] = icmp->type();
+    info["code"] = icmp->code();
+    info["src_ip"] = (ip->src_addr()).to_string();
+    return info;
+  }
+  ~ICMPLog() override {}
+};
+
 class NetLogger {
 private:
   std::vector<std::shared_ptr<LogStrategy>> strategies;
