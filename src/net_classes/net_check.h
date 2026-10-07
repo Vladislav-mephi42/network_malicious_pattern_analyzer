@@ -23,7 +23,7 @@ private:
 public:
   ToMuchSYNCheck(size_t max_sync) : max_sync(max_sync) {}
 
-  virtual bool can_check(const json &log_array) const {
+  virtual bool can_check(const json &log_array) const override {
 
     for (const auto &elem : log_array) {
 
@@ -37,7 +37,7 @@ public:
     }
     return false;
   }
-  virtual json check(const json &log_array) const {
+  virtual json check(const json &log_array) const override {
 
     int i = 0;
     for (const auto &elem : log_array) {
@@ -60,7 +60,8 @@ public:
     json global_report = json::array();
     if (i >= max_sync) {
       json report;
-      report["res"] = "[A LOT OF SYNC FROM ONE IP]";
+      ;
+      report["res"] = "A lot of requests with SYNC flag from one ip";
       report["level"] = "[LOW]";
       report["header"] = "to much sync";
       report["flag"] = true;
@@ -78,7 +79,7 @@ private:
 public:
   ToMuchSYNCheckWithSameIP(size_t max_sync) : max_sync(max_sync) {}
 
-  virtual bool can_check(const json &log_array) const {
+  virtual bool can_check(const json &log_array) const override {
 
     for (const auto &elem : log_array) {
 
@@ -92,7 +93,7 @@ public:
     }
     return false;
   }
-  virtual json check(const json &log_array) const {
+  virtual json check(const json &log_array) const override {
     std::unordered_map<std::string, int> map;
 
     for (const auto &elem : log_array) {
@@ -117,7 +118,11 @@ public:
       if (elem.second >= max_sync) {
         json report;
         flag = true;
-        report["res"] = "[A LOT OF SYNC FROM ONE IP]";
+        std::string res = "A lot of requests with SYNC flag from one ip. IP: ";
+        res += elem.first;
+        res += " Number of packates: ";
+        res += std::to_string(elem.second);
+        report["res"] = res;
         report["level"] = "[LOW]";
         std::string header = "to much sync from the same ip/";
         header += elem.first;
@@ -132,13 +137,89 @@ public:
   ~ToMuchSYNCheckWithSameIP() override{};
 };
 
+class WrongCombOfTCPFlagsWithSameIP : public CheckStrategy {
+
+private:
+  size_t max_number = 0;
+
+public:
+  WrongCombOfTCPFlagsWithSameIP(size_t max_number) : max_number(max_number) {}
+  virtual bool can_check(const json &log_array) const override {
+
+    for (const auto &elem : log_array) {
+
+      if (!elem.contains("protocol")) {
+
+        throw std::runtime_error("bad json format(protocol field)");
+      }
+      if (elem["protocol"] == "TCP-IP") {
+        return true;
+      }
+    }
+    return false;
+  }
+  virtual json check(const json &log_array) const override {
+    std::unordered_map<std::string, int> map;
+
+    for (const auto &elem : log_array) {
+
+      if (!elem.contains("protocol")) {
+        throw std::runtime_error("bad json format");
+      }
+      if (elem["protocol"] == "TCP-IP") {
+
+        if (elem.contains("flags")) {
+          if ((elem["flags"]).contains("SYN") &&
+              (elem["flags"]).contains("FIN")) {
+            map[elem["src_ip"]]++;
+          }
+          if ((elem["flags"]).contains("SYN") &&
+              (elem["flags"]).contains("RST")) {
+            map[elem["src_ip"]]++;
+          }
+          if ((elem["flags"]).contains("FIN") &&
+              (elem["flags"]).contains("RST")) {
+            map[elem["src_ip"]]++;
+          }
+        } else {
+          throw std::runtime_error("bad json format(flags)");
+        }
+      }
+    }
+    bool flag = false;
+    json global_report = json::array();
+    for (const auto &elem : map) {
+      if (elem.second >= max_number) {
+        json report;
+        flag = true;
+        std::string res = "A lot of requests with wrong combination of flags "
+                          "from one ip. IP: ";
+        res += elem.first;
+        res += " Number of packates: ";
+        res += std::to_string(elem.second);
+        report["res"] = res;
+        report["level"] = "[MEDIUM]";
+        std::string header =
+            "to much request with wrong combination of flags from the same ip/";
+        header += elem.first;
+        report["header"] = header;
+        report["flag"] = true;
+        global_report.push_back(report);
+      }
+    }
+
+    return global_report;
+  }
+  ~WrongCombOfTCPFlagsWithSameIP() override{};
+};
+
 class ICMPDDosCheck : public CheckStrategy {
 private:
   size_t max_sync = 0;
 
 public:
   ICMPDDosCheck(size_t max_sync) : max_sync(max_sync) {}
-  virtual bool can_check(const json &log_array) const {
+  virtual bool can_check(const json &log_array) const override {
 
     for (const auto &elem : log_array) {
 
@@ -152,7 +233,7 @@ public:
     }
     return false;
   }
-  virtual json check(const json &log_array) const {
+  virtual json check(const json &log_array) const override {
     std::unordered_map<std::string, int> map;
 
     for (const auto &elem : log_array) {
@@ -162,12 +243,8 @@ public:
       }
       if (elem["protocol"] == "ICMP") {
 
-        if (elem.contains("flags")) {
-          if (elem["type"] == "ECHO_REQUEST") {
-            map[elem["src_ip"]]++;
-          }
-        } else {
-          throw std::runtime_error("bad json format(flags)");
+        if (elem["type"] == ICMP::ECHO_REQUEST) {
+          map[elem["src_ip"]]++;
         }
       }
     }
@@ -177,7 +254,11 @@ public:
       if (elem.second >= max_sync) {
         json report;
         flag = true;
-        report["res"] = "[A LOT OF ECHO REQUESTS FROM ONE IP]";
+        std::string res = "A lot of echo requests from one ip. IP: ";
+        res += elem.first;
+        res += " Number of packates: ";
+        res += std::to_string(elem.second);
+        report["res"] = res;
         report["level"] = "[MEDIUM]";
         std::string header = "to much echo requests from the same ip/";
         header += elem.first;
