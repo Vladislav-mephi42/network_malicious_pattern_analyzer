@@ -150,8 +150,10 @@ public:
   NetLogger() {
     TCPIPLog tcpip;
     TCPLog tcp;
+    ICMPLog icmp;
     strategies.push_back(std::make_shared<TCPLog>(tcp));
     strategies.push_back(std::make_shared<TCPIPLog>(tcpip));
+    strategies.push_back(std::make_shared<ICMPLog>(icmp));
   }
   NetLogger(const std::vector<std::shared_ptr<LogStrategy>> &strategies)
       : strategies(strategies) {}
