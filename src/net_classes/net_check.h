@@ -213,6 +213,70 @@ public:
   ~WrongCombOfTCPFlagsWithSameIP() override{};
 };
 
+class ZeroPortVulnerability : public CheckStrategy {
+
+private:
+  size_t max_number = 0;
+
+public:
+  ZeroPortVulnerability(size_t max_number) : max_number(max_number) {}
+  virtual bool can_check(const json &log_array) const override {
+
+    for (const auto &elem : log_array) {
+
+      if (!elem.contains("protocol")) {
+
+        throw std::runtime_error("bad json format(protocol field)");
+      }
+      if (elem["protocol"] == "TCP-IP") {
+        return true;
+      }
+    }
+    return false;
+  }
+  virtual json check(const json &log_array) const override {
+    std::unordered_map<std::string, int> map;
+
+    for (const auto &elem : log_array) {
+
+      if (!elem.contains("protocol")) {
+        throw std::runtime_error("bad json format");
+      }
+      if (elem["protocol"] == "TCP-IP") {
+
+        if (elem["dport"] == 0) {
+          map[elem["src_ip"]]++;
+        }
+      }
+    }
+
+    bool flag = false;
+    json global_report = json::array();
+    for (const auto &elem : map) {
+      if (elem.second >= max_number) {
+        json report;
+        flag = true;
+        std::string res = "A lot of requests with 0 dst port "
+                          "from one ip. IP: ";
+        res += elem.first;
+        res += " Number of packates: ";
+        res += std::to_string(elem.second);
+        report["res"] = res;
+        report["level"] = "[HIGH]";
+        std::string header =
+            "to much request with 0 dst port from the same ip/";
+        header += elem.first;
+        report["header"] = header;
+        report["flag"] = true;
+        global_report.push_back(report);
+      }
+    }
+
+    return global_report;
+  }
+  ~ZeroPortVulnerability() override{};
+};
+
 class ICMPDDosCheck : public CheckStrategy {
 private:
   size_t max_sync = 0;
