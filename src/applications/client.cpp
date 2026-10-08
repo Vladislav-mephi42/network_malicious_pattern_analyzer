@@ -36,9 +36,10 @@ bool handle_func(const PDU &pdu) { return true; }
 int main(int argc, char **argv) {
   try {
     std::string iface = (argc > 1) ? argv[1] : "lo";
-    std::string filter = (argc > 2) ? argv[2] : "tcp";
+    std::string filter =
+        (argc > 2) ? argv[2] : "tcp port 7009 or tcp port 0 or icmp";
     NetLogger logger;
-    NetSniffer sniffer(iface, filter, 6, logger);
+    NetSniffer sniffer(iface, filter, 20, logger);
     sniffer.run();
     json data = sniffer.get_data();
     std::cout << data.dump(4) << std::endl;
@@ -52,7 +53,7 @@ int main(int argc, char **argv) {
     std::cout << std::endl;
     std::cout << std::endl;
 
-    std::cout << "Data from server: " << new_data << std::endl;
+    std::cout << "Report from server: " << new_data.dump(4) << std::endl;
     std::cout << std::endl;
   } catch (const std::exception &e) {
     std::cout << e.what() << std::endl;
