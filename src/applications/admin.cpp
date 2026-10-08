@@ -40,6 +40,6 @@ int main() {
   {
     FIFOReader reader(r_path, false);
     auto res = reader.read_json();
-    std::cout << res.dump() << std::endl;
+    std::cout << res.dump(4) << std::endl;
   }
 }
