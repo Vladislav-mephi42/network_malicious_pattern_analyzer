@@ -73,17 +73,16 @@ void handle_fifo() {
       return;
     }
 
-    std::string w_path = "./1.fifo";
-    std::string r_path = "./2.fifo";
-    Fifo_file f_w(w_path);
-    Fifo_file f_r(r_path);
-    json data;
-    data["base"] = 0;
-
-    SharedMemory parent("/memory.shm", size, "/semophore.sem", true);
-    parent.write_json(data);
-
     try {
+      std::string w_path = "./1.fifo";
+      std::string r_path = "./2.fifo";
+      Fifo_file f_w(w_path);
+      Fifo_file f_r(r_path);
+      json data;
+      data["Messages"] = "packages numbers";
+
+      SharedMemory parent("/memory.shm", size, "/semophore.sem", true);
+      parent.write_json(data);
       while (keep_fifo_running == 0) {
         {
           FIFOReader reader(r_path, false);
@@ -111,25 +110,28 @@ void handle_fifo() {
 void handle_client(Client_socket &socket, size_t size) {
   try {
     std::vector<std::shared_ptr<CheckStrategy>> checks;
-    ToMuchSYNCheck check_1(1);
-    checks.push_back(std::make_shared<ToMuchSYNCheck>(check_1));
-    ToMuchSYNCheckWithSameIP check_2(1);
-    checks.push_back(std::make_shared<ToMuchSYNCheckWithSameIP>(check_2));
-    ICMPDDosCheck check_3(1);
-    checks.push_back(std::make_shared<ICMPDDosCheck>(check_3));
+    checks.push_back(std::make_shared<ToMuchSYNCheck>(1));
+    checks.push_back(std::make_shared<ToMuchSYNCheckWithSameIP>(1));
+    checks.push_back(std::make_shared<ICMPDDosCheck>(1));
+    checks.push_back(std::make_shared<WrongCombOfTCPFlagsWithSameIP>(1));
+    checks.push_back(std::make_shared<ZeroPortVulnerability>(1));
     auto recv_data = socket.recv_json();
 
     SharedMemory child("/memory.shm", size, "/semophore.sem", false);
     auto new_data = child.read_json();
-
+    json response = json::array();
     for (const auto &check : checks) {
       if (check->can_check(recv_data)) {
         json data_array = check->check(recv_data);
-        for (const auto &data : data_array) {
+        for (auto &data : data_array) {
+          data["res"] =
+              data["level"].get<std::string>() + data["res"].get<std::string>();
+          response.push_back(data["res"]);
           if (new_data.contains(data["header"])) {
             int n = new_data[data["header"]];
             n++;
             new_data[data["header"]] = n;
+
           } else {
             new_data[data["header"]] = 1;
           }
@@ -138,7 +140,7 @@ void handle_client(Client_socket &socket, size_t size) {
     }
 
     child.write_json(new_data);
-    socket.send_json(new_data);
+    socket.send_json(response);
 
   } catch (const std::exception &e) {
     std::cout << e.what() << std::endl;
