@@ -11,38 +11,35 @@ int main(int argc, char *argv[]) {
   std::string iface = "lo";
   std::string dst_ip = "127.0.0.1";
   uint16_t dst_port = 7009;
-  int packet_count = 6;
-
-  if (argc > 1)
-    iface = argv[1];
-  if (argc > 2)
-    dst_ip = argv[2];
-  if (argc > 3)
-    dst_port = std::stoi(argv[3]);
-  if (argc > 4)
-    packet_count = std::stoi(argv[4]);
+  int tcp_packet_count = 4;
+  int icmp_packet_count = 10;
 
   std::cout << "=== libtins Traffic Generator ===\n";
   std::cout << "Interface : " << iface << "\n";
   std::cout << "Target    : " << dst_ip << ":" << dst_port << "\n";
-  std::cout << "Packets   : " << packet_count << "\n\n";
+  std::cout << "TCMP Packets   : " << tcp_packet_count << "\n\n";
 
   PacketSender sender;
 
   TCP::Flags flag_sequence[] = {TCP::Flags(TCP::SYN),
-                                TCP::Flags(TCP::SYN | TCP::ACK),
-                                TCP::Flags(TCP::ACK | TCP::SYN),
+                                TCP::Flags(TCP::SYN | TCP::FIN),
+                                TCP::Flags(TCP::RST | TCP::SYN),
                                 TCP::Flags(TCP::PSH | TCP::ACK | TCP::SYN),
-                                TCP::Flags(TCP::FIN | TCP::ACK | TCP::SYN),
+                                TCP::Flags(TCP::FIN | TCP::RST),
                                 TCP::Flags(TCP::RST | TCP::SYN),
                                 TCP::Flags(TCP::URG | TCP::ACK | TCP::SYN)};
   int num_flags = sizeof(flag_sequence) / sizeof(flag_sequence[0]);
 
-  for (int i = 0; i < packet_count; ++i) {
+  for (int i = 0; i < tcp_packet_count; ++i) {
+    dst_port = 7009;
     IP ip_layer(dst_ip);
+    if (i % 5 == 0) {
+      dst_port = 0;
+    }
     TCP tcp_layer(dst_port);
 
     tcp_layer.sport(40000 + (i % 100));
+
     tcp_layer.flags(flag_sequence[i % num_flags]);
     tcp_layer.seq(1000 * (i + 1));
     tcp_layer.ack_seq(2000 * (i + 1));
@@ -66,6 +63,26 @@ int main(int argc, char *argv[]) {
                 << (int)tcp_layer.flags() << std::dec
                 << " | Seq: " << tcp_layer.seq()
                 << " | Size: " << tcp_layer.size() << " bytes\n";
+    } catch (const std::exception &e) {
+      std::cerr << "[-] Error sending packet: " << e.what() << "\n";
+      std::cerr << "    (Did you run with sudo?)\n";
+      return 1;
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+  }
+
+  for (int i = 0; i < icmp_packet_count; ++i) {
+    IP ip_layer(dst_ip);
+    ICMP icmp_layer(ICMP::ECHO_REQUEST);
+
+    ip_layer /= icmp_layer;
+
+    try {
+      sender.send(ip_layer, iface);
+
+      std::cout << "[+] Send ICMP #" << (i + 1) << std::endl;
+
     } catch (const std::exception &e) {
       std::cerr << "[-] Error sending packet: " << e.what() << "\n";
       std::cerr << "    (Did you run with sudo?)\n";
