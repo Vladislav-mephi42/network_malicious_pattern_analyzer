@@ -73,8 +73,17 @@ int main(int argc, char *argv[]) {
   }
 
   for (int i = 0; i < icmp_packet_count; ++i) {
+    ICMP::Flags types[] = {
+        ICMP::ECHO_REQUEST, ICMP::ADDRESS_MASK_REQUEST, ICMP::REDIRECT,
+        ICMP::REDIRECT,     ICMP::ECHO_REQUEST,         ICMP::INFO_REQUEST,
+        ICMP::INFO_REPLY,   ICMP::SOURCE_QUENCH,        ICMP::ECHO_REQUEST,
+    };
+    int types_number = sizeof(types) / sizeof(types[0]);
     IP ip_layer(dst_ip);
-    ICMP icmp_layer(ICMP::ECHO_REQUEST);
+    ICMP icmp_layer(types[i % types_number]);
+    std::vector<uint8_t> payload(1001, 0x00);
+
+    icmp_layer /= RawPDU(payload);
 
     ip_layer /= icmp_layer;
 
