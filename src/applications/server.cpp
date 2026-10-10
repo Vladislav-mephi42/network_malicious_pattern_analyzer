@@ -115,6 +115,9 @@ void handle_client(Client_socket &socket, size_t size) {
     checks.push_back(std::make_shared<ICMPDDosCheck>(1));
     checks.push_back(std::make_shared<WrongCombOfTCPFlagsWithSameIP>(1));
     checks.push_back(std::make_shared<ZeroPortVulnerability>(1));
+    checks.push_back(std::make_shared<ICMPVulnerableOldProtocol>(1));
+    checks.push_back(std::make_shared<ICMPTunneling>(1));
+    checks.push_back(std::make_shared<ICMPMITMAttack>(1));
     auto recv_data = socket.recv_json();
 
     SharedMemory child("/memory.shm", size, "/semophore.sem", false);
