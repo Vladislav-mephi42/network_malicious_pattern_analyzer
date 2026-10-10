@@ -136,6 +136,7 @@ public:
     info["protocol"] = "ICMP";
     info["type"] = icmp->type();
     info["code"] = icmp->code();
+    info["size"] = icmp->size();
     info["src_ip"] = (ip->src_addr()).to_string();
     return info;
   }
@@ -169,4 +170,36 @@ public:
   }
 };
 
+class ARPLog : public LogStrategy {
+public:
+  virtual bool can_log(const PDU &pdu) const override {
+    auto arp = pdu.find_pdu<ARP>();
+    return arp != nullptr;
+  }
+
+  virtual json log(const PDU &pdu) const override {
+    auto arp = pdu.find_pdu<ARP>();
+
+    if (arp == nullptr) {
+      throw std::runtime_error("logging failed: not an ARP packet");
+    }
+
+    json info;
+    info["protocol"] = "ARP";
+    info["opcode"] = arp->opcode();
+    info["sender_ip"] = arp->sender_ip_addr().to_string();
+    info["sender_mac"] = arp->sender_hw_addr().to_string();
+    info["target_ip"] = arp->target_ip_addr().to_string();
+    info["target_mac"] = arp->target_hw_addr().to_string();
+    info["hw_type"] = arp->hwaddr_type();
+    info["proto_type"] = arp->protocol_type();
+    info["hw_len"] = arp->hwaddr_length();
+    info["proto_len"] = arp->protocol_length();
+    info["size"] = arp->size();
+
+    return info;
+  }
+
+  ~ARPLog() override {}
+};
 #endif
