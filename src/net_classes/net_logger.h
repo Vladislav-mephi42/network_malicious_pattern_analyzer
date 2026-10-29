@@ -336,6 +336,7 @@ public:
     strategies.push_back(std::make_shared<TCPLog>(tcp));
     strategies.push_back(std::make_shared<TCPIPLog>(tcpip));
     strategies.push_back(std::make_shared<ICMPLog>(icmp));
+    strategies.push_back(std::make_shared<DNSLog>());
   }
   NetLogger(const std::vector<std::shared_ptr<LogStrategy>> &strategies)
       : strategies(strategies) {}
