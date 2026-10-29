@@ -33,7 +33,11 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(json catch2 libtins)
 
-add_executable(server_app ${SRC}/applications/server.cpp)
+add_executable(server_app 
+    ${SRC}/applications/server.cpp 
+    ${SRC}/sys_classes/fifo.cpp
+    ${SRC}/sys_classes/shared_memory.cpp
+    ${SRC}/sys_classes/sockets.cpp)
 target_link_libraries(server_app PRIVATE Catch2::Catch2WithMain)
 target_link_libraries(server_app PRIVATE nlohmann_json::nlohmann_json)
 target_include_directories(server_app PRIVATE ${libtins_SOURCE_DIR}/include)
@@ -41,7 +45,7 @@ target_link_libraries(server_app PRIVATE tins)
 target_include_directories(server_app PRIVATE ${SRC}/sys_classes)
 target_include_directories(server_app PRIVATE ${SRC}/net_classes)
 
-add_executable(client_app ${SRC}/applications/client.cpp)
+add_executable(client_app ${SRC}/applications/client.cpp ${SRC}/sys_classes/sockets.cpp)
 target_link_libraries(client_app PRIVATE Catch2::Catch2WithMain)
 target_link_libraries(client_app PRIVATE nlohmann_json::nlohmann_json)
 target_include_directories(client_app PRIVATE ${libtins_SOURCE_DIR}/include)
@@ -50,7 +54,7 @@ target_include_directories(client_app PRIVATE ${SRC}/sys_classes)
 target_include_directories(client_app PRIVATE ${SRC}/net_classes)
 
 
-add_executable(traffic_gen ${SRC}/applications/traffic_gen.cpp)
+add_executable(traffic_gen ${SRC}/applications/traffic_gen.cpp )
 target_link_libraries(traffic_gen PRIVATE Catch2::Catch2WithMain)
 target_link_libraries(traffic_gen PRIVATE nlohmann_json::nlohmann_json)
 target_include_directories(traffic_gen PRIVATE ${libtins_SOURCE_DIR}/include)
@@ -58,24 +62,24 @@ target_link_libraries(traffic_gen PRIVATE tins)
 target_include_directories(traffic_gen PRIVATE ${SRC}/sys_classes)
 target_include_directories(traffic_gen PRIVATE ${SRC}/net_classes)
 
-add_executable(admin_app ${SRC}/applications/admin.cpp)
+add_executable(admin_app ${SRC}/applications/admin.cpp ${SRC}/sys_classes/fifo.cpp)
 target_link_libraries(admin_app PRIVATE Catch2::Catch2WithMain)
 target_link_libraries(admin_app PRIVATE nlohmann_json::nlohmann_json)
 target_include_directories(admin_app PRIVATE ${SRC}/sys_classes)
 
-add_executable(sockets_test ${TESTS}/sockets_test.cpp)
+add_executable(sockets_test ${TESTS}/sockets_test.cpp ${SRC}/sys_classes/sockets.cpp)
 target_link_libraries(sockets_test PRIVATE Catch2::Catch2WithMain)
 target_link_libraries(sockets_test PRIVATE nlohmann_json::nlohmann_json)
 target_include_directories(sockets_test PRIVATE ${SRC}/sys_classes)
 
 
-add_executable(fifo_test ${TESTS}/fifo_test.cpp)
+add_executable(fifo_test ${TESTS}/fifo_test.cpp ${SRC}/sys_classes/fifo.cpp)
 target_link_libraries(fifo_test PRIVATE Catch2::Catch2WithMain)
 target_link_libraries(fifo_test PRIVATE nlohmann_json::nlohmann_json)
 target_include_directories(fifo_test PRIVATE ${SRC}/sys_classes)
 
 
-add_executable(shared_test ${TESTS}/shared_test.cpp)
+add_executable(shared_test ${TESTS}/shared_test.cpp ${SRC}/sys_classes/shared_memory.cpp)
 target_link_libraries(shared_test PRIVATE Catch2::Catch2WithMain)
 target_link_libraries(shared_test PRIVATE nlohmann_json::nlohmann_json)
 target_link_libraries(shared_test PRIVATE rt pthread)
