@@ -20,7 +20,16 @@ int main(int argc, char *argv[]) {
   std::cout << "TCMP Packets   : " << tcp_packet_count << "\n\n";
 
   PacketSender sender;
-
+  UDP udp_layer(53, 53);
+  DNS dns_layer;
+  dns_layer.type(DNS::RESPONSE);
+  IP ip_layer(dst_ip);
+  std::vector<uint8_t> payload(2000, 0x00);
+  RawPDU raw_layer(payload);
+  dns_layer /= raw_layer;
+  udp_layer /= dns_layer;
+  ip_layer /= udp_layer;
+  sender.send(ip_layer, iface);
   TCP::Flags flag_sequence[] = {TCP::Flags(TCP::SYN),
                                 TCP::Flags(TCP::SYN | TCP::FIN),
                                 TCP::Flags(TCP::RST | TCP::SYN),
