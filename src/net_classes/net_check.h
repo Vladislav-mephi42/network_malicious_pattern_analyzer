@@ -523,4 +523,115 @@ public:
   ~ICMPMITMAttack() override {}
 };
 
+class ARPSpoofing : public CheckStrategy {
+private:
+public:
+  virtual bool can_check(const json &log_array) const override {
+
+    for (const auto &elem : log_array) {
+
+      if (!elem.contains("protocol")) {
+
+        throw std::runtime_error("bad json format(protocol field)");
+      }
+      if (elem["protocol"] == "ARP") {
+        return true;
+      }
+    }
+    return false;
+  }
+  virtual json check(const json &log_array) const override {
+    int count = 0;
+    for (const auto &elem : log_array) {
+
+      if (!elem.contains("protocol")) {
+        throw std::runtime_error("bad json format");
+      }
+      if (elem["protocol"] == "ARP") {
+
+        if (elem["opcode"] == ARP::REPLY &&
+            elem["sender_ip"] == elem["getway_ip"] &&
+            elem["sender_mac"] != elem["gateway_mac"]) {
+          count++;
+        }
+      }
+    }
+
+    json global_report = json::array();
+
+    if (count > 0) {
+      json report;
+
+      std::string res = "ARP Spoofing attack. The danger is very high";
+
+      res += " Number of packages: ";
+      res += std::to_string(count);
+      report["res"] = res;
+      report["level"] = "[SUPER HIGH]";
+      std::string header = "ARP Spoofing attack. The danger is very high";
+      report["header"] = header;
+      report["flag"] = true;
+      global_report.push_back(report);
+    }
+
+    return global_report;
+  }
+  ~ARPSpoofing() override {}
+};
+class DNSDDoS : public CheckStrategy {
+  int max_size = 0;
+
+public:
+  DNSDDoS(int max_size) : max_size(max_size) {}
+  virtual bool can_check(const json &log_array) const override {
+
+    for (const auto &elem : log_array) {
+
+      if (!elem.contains("protocol")) {
+
+        throw std::runtime_error("bad json format(protocol field)");
+      }
+      if (elem["protocol"] == "DNS") {
+        std::cout << "FIND DNS FIND DNS" << std::endl;
+        return true;
+      }
+    }
+    return false;
+  }
+  virtual json check(const json &log_array) const override {
+    int count = 0;
+    for (const auto &elem : log_array) {
+
+      if (!elem.contains("protocol")) {
+        throw std::runtime_error("bad json format");
+      }
+      if (elem["protocol"] == "DNS") {
+
+        if (elem["size"] > max_size && elem["query_type"] == DNS::RESPONSE) {
+          count++;
+        }
+      }
+    }
+
+    json global_report = json::array();
+
+    if (count > 0) {
+      json report;
+
+      std::string res = "Amplifying a DDoS attack using the DNS protocol";
+
+      res += " Number of packages: ";
+      res += std::to_string(count);
+      report["res"] = res;
+      report["level"] = "[LOW]";
+      std::string header = "Amplifying a DDoS attack using the DNS protocol";
+      report["header"] = header;
+      report["flag"] = true;
+      global_report.push_back(report);
+    }
+
+    return global_report;
+  }
+  ~DNSDDoS() override {}
+};
 #endif
