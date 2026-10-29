@@ -52,72 +52,13 @@ public:
     std::swap(fd, other.fd);
     return *this;
   }
-  void send_n(const char *buf, int len, int flags = 0) {
-    int current = 0;
-    int total = 0;
+  void send_n(const char *buf, int len, int flags = 0);
+  void recv_n(char *buf, int len, int flags = 0);
+  void auto_send(const char *buf, int len, int flags = 0);
+  int auto_recv(char *buf, int len, int flags = 0);
 
-    while (current != len) {
-      total = send(fd, buf + current, len - current, flags);
-      if (total < 0) {
-        throw std::system_error(errno, std::generic_category(), "bad send");
-      }
-      current += total;
-    }
-  }
-  void recv_n(char *buf, int len, int flags = 0) {
-    int current = 0;
-    int total = 0;
-
-    while (current != len) {
-      total = recv(fd, (void *)(buf + current), len - current, flags);
-      if (total < 0) {
-        throw std::system_error(errno, std::generic_category(), "bad send");
-      }
-      if (total == 0) {
-        throw std::runtime_error("recv: connection closed by peer");
-      }
-      current += total;
-    }
-  }
-  void auto_send(const char *buf, int len, int flags = 0) {
-    uint32_t inet_len = htonl((uint32_t)len);
-    int res = send(fd, &inet_len, sizeof(inet_len), 0);
-    if (res <= 0) {
-      throw std::system_error(errno, std::generic_category(), "bad send");
-    }
-    send_n(buf, len, flags);
-  }
-  int auto_recv(char *buf, int len, int flags = 0) {
-    uint32_t inet_len;
-    int res = recv(fd, &inet_len, sizeof(inet_len), 0);
-    if (res <= 0) {
-      throw std::system_error(errno, std::generic_category(), "bad recv");
-    }
-    inet_len = ntohl(inet_len);
-    if (inet_len > len) {
-      throw std::runtime_error("inet len is bigger than can be");
-    }
-    recv_n(buf, (int)inet_len, flags);
-    return (int)inet_len;
-  }
-
-  void send_json(const json &data) {
-    auto ser = data.dump();
-
-    auto_send(ser.c_str(), ser.size());
-  }
-  json recv_json() {
-    uint32_t inet_len;
-    int res = recv(fd, &inet_len, sizeof(inet_len), 0);
-    if (res <= 0) {
-      throw std::system_error(errno, std::generic_category(), "bad recv");
-    }
-    int len = ntohl(inet_len);
-    std::string buf;
-    buf.resize(len);
-    recv_n(buf.data(), len);
-    return json::parse(buf);
-  }
+  void send_json(const json &data);
+  json recv_json();
 };
 
 class Client_socket : public TCPSocket {
