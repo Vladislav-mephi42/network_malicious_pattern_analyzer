@@ -37,7 +37,8 @@ int main(int argc, char **argv) {
   try {
     std::string iface = (argc > 1) ? argv[1] : "lo";
     std::string filter =
-        (argc > 2) ? argv[2] : "tcp port 7009 or tcp port 0 or icmp";
+        (argc > 2) ? argv[2]
+                   : "tcp port 7009 or tcp port 0 or icmp or udp port 53";
     NetLogger logger;
     NetSniffer sniffer(iface, filter, 20, logger);
     sniffer.run();

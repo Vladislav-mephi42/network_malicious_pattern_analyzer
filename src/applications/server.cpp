@@ -118,6 +118,8 @@ void handle_client(Client_socket &socket, size_t size) {
     checks.push_back(std::make_shared<ICMPVulnerableOldProtocol>(1));
     checks.push_back(std::make_shared<ICMPTunneling>(1));
     checks.push_back(std::make_shared<ICMPMITMAttack>(1));
+    checks.push_back(std::make_shared<ARPSpoofing>());
+    checks.push_back(std::make_shared<DNSDDoS>(1000));
     auto recv_data = socket.recv_json();
 
     SharedMemory child("/memory.shm", size, "/semophore.sem", false);
